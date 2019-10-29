@@ -63,7 +63,10 @@ InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode
   if(vec_string.empty())
       int_marker->name = mesh_path;
   else
+  {
+      vec_string.pop_back();
       int_marker->name = vec_string.back();
+  }
 
   int_marker->description = "Mesh 6-DOF Control";
 
@@ -75,7 +78,7 @@ InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode
 
   if ( fixed )
   {
-    int_marker->name += "_fixed";
+    //int_marker->name += "_fixed";
     int_marker->description += "\n(fixed orientation)";
     control.orientation_mode = InteractiveMarkerControl::FIXED;
   }
@@ -86,7 +89,7 @@ InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode
       if( interaction_mode == visualization_msgs::InteractiveMarkerControl::MOVE_3D )         mode_text = "MOVE_3D";
       if( interaction_mode == visualization_msgs::InteractiveMarkerControl::ROTATE_3D )       mode_text = "ROTATE_3D";
       if( interaction_mode == visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D )  mode_text = "MOVE_ROTATE_3D";
-      int_marker->name += "_" + mode_text;
+      //int_marker->name += "_" + mode_text;
       int_marker->description = std::string("3D Control") + (show_6dof ? " + 6-DOF controls" : "") + "\n" + mode_text;
   }
 
