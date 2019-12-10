@@ -13,19 +13,20 @@ using namespace visualization_msgs;
 ros::Publisher collision_object_publisher;
 InteractiveMarker::Ptr int_marker;
 std::string mesh_path;
-double scale;
+double scale_x, scale_y, scale_z;
 
 
 
-Marker makeBox( InteractiveMarker &msg, const std::string& mesh_resource, const double scale)
+Marker makeBox( InteractiveMarker &msg, const std::string& mesh_resource,
+                const double scale_x, const double scale_y, const double scale_z)
 {
   Marker marker;
 
   marker.type = Marker::MESH_RESOURCE;
   marker.mesh_resource = mesh_resource;
-  marker.scale.x = scale;
-  marker.scale.y = scale;
-  marker.scale.z = scale;
+  marker.scale.x = scale_x;
+  marker.scale.y = scale_y;
+  marker.scale.z = scale_z;
   marker.color.r = 0.5;
   marker.color.g = 0.5;
   marker.color.b = 0.5;
@@ -35,11 +36,11 @@ Marker makeBox( InteractiveMarker &msg, const std::string& mesh_resource, const 
 }
 
 InteractiveMarkerControl& makeBoxControl( InteractiveMarker &msg, const std::string& mesh_resource,
-                                          const double scale)
+                                          const double scale_x, const double scale_y, const double scale_z)
 {
   InteractiveMarkerControl control;
   control.always_visible = true;
-  control.markers.push_back( makeBox(msg, mesh_resource, scale) );
+  control.markers.push_back( makeBox(msg, mesh_resource, scale_x, scale_y, scale_z) );
   msg.controls.push_back( control );
 
   return msg.controls.back();
@@ -48,7 +49,7 @@ InteractiveMarkerControl& makeBoxControl( InteractiveMarker &msg, const std::str
 moveit_msgs::CollisionObject createCollisionObject(const moveit_msgs::CollisionObject::_operation_type operation_type,
                                                    const InteractiveMarker::Ptr int_marker,
                                                    const std::string& mesh_path,
-                                                   const double scale,
+                                                   const double scale_x, const double scale_y, const double scale_z,
                                                    const geometry_msgs::Pose& pose)
 {
     moveit_msgs::CollisionObject co;
@@ -57,7 +58,9 @@ moveit_msgs::CollisionObject createCollisionObject(const moveit_msgs::CollisionO
     co.header.stamp = ros::Time::now();
 
     shapes::ShapeMsg mesh_msg;
-    shapes::constructMsgFromShape(shapes::createMeshFromResource(mesh_path, scale*Eigen::Vector3d::Ones()), mesh_msg);
+    Eigen::Vector3d scale;
+    scale<<scale_x, scale_y, scale_z;
+    shapes::constructMsgFromShape(shapes::createMeshFromResource(mesh_path, scale), mesh_msg);
     co.meshes.push_back(boost::get<shape_msgs::Mesh>(mesh_msg));
     co.mesh_poses.push_back(pose);
 
@@ -69,38 +72,35 @@ moveit_msgs::CollisionObject createCollisionObject(const moveit_msgs::CollisionO
 void processFeedback(
     const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback )
 {
-  ROS_INFO_STREAM( feedback->marker_name << " is now at "
+  ROS_INFO_STREAM( feedback->marker_name << " is now at pos = ["
       << feedback->pose.position.x << ", " << feedback->pose.position.y
-      << ", " << feedback->pose.position.z );
+      << ", " << feedback->pose.position.z<<"]  quat_xyzw = ["<<feedback->pose.orientation.x<<", "
+      <<feedback->pose.orientation.y<<", "<<feedback->pose.orientation.z<<", "<<feedback->pose.orientation.w<<"]");
 
   collision_object_publisher.publish(createCollisionObject(moveit_msgs::CollisionObject::MOVE, int_marker,
-                                                           mesh_path, scale, feedback->pose));
+                                                           mesh_path, scale_x, scale_y, scale_z, feedback->pose));
 }
 
-InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode, const tf::Vector3& position, bool show_6dof,
-                     const std::string& mesh_path, const double scale, const std::string& frame_id,
-                     interactive_markers::InteractiveMarkerServer& server)
+InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode, const tf::Vector3& position,
+                                       const tf::Quaternion& orientation,
+                                       bool show_6dof,
+                     const std::string& mesh_path, const double scale_x, const double scale_y, const double scale_z,
+                     const std::string& frame_id,
+                     interactive_markers::InteractiveMarkerServer& server, const std::string& name_id)
 {
   InteractiveMarker::Ptr int_marker = boost::make_shared<InteractiveMarker>();
   int_marker->header.frame_id = frame_id;
   tf::pointTFToMsg(position, int_marker->pose.position);
+  tf::quaternionTFToMsg(orientation, int_marker->pose.orientation);
   int_marker->scale = 1;
 
-  std::vector< std::string > vec_string;
-  boost::split(vec_string, mesh_path, boost::is_any_of("/,."), boost::token_compress_on);
 
-  if(vec_string.empty())
-      int_marker->name = mesh_path;
-  else
-  {
-      vec_string.pop_back();
-      int_marker->name = vec_string.back();
-  }
+  int_marker->name = name_id;
 
   int_marker->description = "Mesh 6-DOF Control";
 
   // insert a box
-  makeBoxControl(*int_marker, mesh_path, scale);
+  makeBoxControl(*int_marker, mesh_path, scale_x, scale_y, scale_z);
   int_marker->controls[0].interaction_mode = interaction_mode;
 
   InteractiveMarkerControl control;
@@ -124,6 +124,8 @@ InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode
 
   if(show_6dof)
   {
+    control.always_visible = false;
+
     control.orientation.w = 1;
     control.orientation.x = 1;
     control.orientation.y = 0;
@@ -177,25 +179,66 @@ int main(int argc, char** argv)
       return 0;
   }
 
+  std::string name_id;
+  if(!n.getParam("name_id", name_id))
+  {
+      ROS_ERROR("Private param 'name_id' needs to be specified! Exiting");
+      return 0;
+  }
+
   ROS_INFO("mesh_path: %s", mesh_path.c_str());
   mesh_path = "file://" + mesh_path;
 
-  if(!n.getParam("scale", scale))
-      scale = 1.;
-  ROS_INFO("Scale: %f", scale);
+
+  double scale_x = scale_y = scale_z = 1.;
+  if(n.hasParam("scale"))
+  {
+      double scale;
+      n.getParam("scale", scale);
+      scale_x = scale_y = scale_z = scale;
+  }
+  else
+  {
+     scale_x =  n.param("scale_x", 1.);
+     scale_y =  n.param("scale_y", 1.);
+     scale_z =  n.param("scale_z", 1.);
+  }
+
+  ROS_INFO("Scale: [%f, %f, %f]", scale_x, scale_y, scale_z);
+
 
   std::string frame_id;
   if(!n.getParam("frame_id", frame_id))
       frame_id = "base_link";
   ROS_INFO("frame_id: %s", frame_id.c_str());
 
-
-  // create an interactive marker server on the topic namespace simple_marker
-  interactive_markers::InteractiveMarkerServer server("simple_marker");
+  bool show_control = n.param("show_control_axis", true);
 
   tf::Vector3 position(0,0,0);
+  if(n.hasParam("position"))
+  {
+      XmlRpc::XmlRpcValue v;
+      n.getParam("position", v);
+      for(unsigned int i = 0; i < 3; ++i)
+          position[i] = static_cast<double>(v[i]);
+      ROS_INFO("Position: [%f, %f, %f]", position[0], position[1], position[2]);
+  }
+  tf::Quaternion q(0,0,0,1);
+  if(n.hasParam("orientation"))
+  {
+      XmlRpc::XmlRpcValue v;
+      n.getParam("orientation", v);
+      for(unsigned int i = 0; i < 4; ++i)
+          q[i] = static_cast<double>(v[i]);
+      ROS_INFO("Orientation: [%f, %f, %f, %f]", q[0], q[1], q[2], q[3]);
+  }
+
+  // create an interactive marker server on the topic namespace simple_marker
+  interactive_markers::InteractiveMarkerServer server("simple_marker_"+name_id);
+
+
   int_marker = make6DofMarker(false, visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D,
-                 position, true, mesh_path, scale, frame_id, server);
+                 position, q, show_control, mesh_path, scale_x, scale_y, scale_z, frame_id, server, name_id);
 
   // 'commit' changes and send to all clients
   server.applyChanges();
@@ -206,10 +249,10 @@ int main(int argc, char** argv)
 
 
   geometry_msgs::Pose pose;
-  pose.position.x = 0.;pose.position.y = 0.;pose.position.z = 0.;
-  pose.orientation.w = 1.0; pose.orientation.x = 0.0; pose.orientation.y = 0.0; pose.orientation.z = 0.0;
+  pose.position.x = position.x(); pose.position.y = position.y(); pose.position.z = position.z();
+  pose.orientation.x = q.x(); pose.orientation.y = q.y(); pose.orientation.z = q.z(); pose.orientation.w = q.w();
   collision_object_publisher.publish(createCollisionObject(moveit_msgs::CollisionObject::ADD, int_marker,
-                                                           mesh_path, scale, pose));
+                                                           mesh_path, scale_x, scale_y, scale_z, pose));
 
 
   // start the ROS main loop
