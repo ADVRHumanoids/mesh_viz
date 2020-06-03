@@ -14,11 +14,13 @@ ros::Publisher collision_object_publisher;
 InteractiveMarker::Ptr int_marker;
 std::string mesh_path;
 double scale_x, scale_y, scale_z;
+double r, g, b, a;
 
 
 
 Marker makeBox( InteractiveMarker &msg, const std::string& mesh_resource,
-                const double scale_x, const double scale_y, const double scale_z)
+                const double scale_x, const double scale_y, const double scale_z,
+                const double r, const double g, const double b, const double a)
 {
   Marker marker;
 
@@ -27,20 +29,21 @@ Marker makeBox( InteractiveMarker &msg, const std::string& mesh_resource,
   marker.scale.x = scale_x;
   marker.scale.y = scale_y;
   marker.scale.z = scale_z;
-  marker.color.r = 0.5;
-  marker.color.g = 0.5;
-  marker.color.b = 0.5;
-  marker.color.a = 1.0;
+  marker.color.r = r;
+  marker.color.g = g;
+  marker.color.b = b;
+  marker.color.a = a;
 
   return marker;
 }
 
 InteractiveMarkerControl& makeBoxControl( InteractiveMarker &msg, const std::string& mesh_resource,
-                                          const double scale_x, const double scale_y, const double scale_z)
+                                          const double scale_x, const double scale_y, const double scale_z,
+                                          const double r, const double g, const double b, const double a)
 {
   InteractiveMarkerControl control;
   control.always_visible = true;
-  control.markers.push_back( makeBox(msg, mesh_resource, scale_x, scale_y, scale_z) );
+  control.markers.push_back( makeBox(msg, mesh_resource, scale_x, scale_y, scale_z, r, g, b, a) );
   msg.controls.push_back( control );
 
   return msg.controls.back();
@@ -50,6 +53,7 @@ moveit_msgs::CollisionObject createCollisionObject(const moveit_msgs::CollisionO
                                                    const InteractiveMarker::Ptr int_marker,
                                                    const std::string& mesh_path,
                                                    const double scale_x, const double scale_y, const double scale_z,
+                                                   const double r, const double g, const double b, const double a,
                                                    const geometry_msgs::Pose& pose)
 {
     moveit_msgs::CollisionObject co;
@@ -78,13 +82,16 @@ void processFeedback(
       <<feedback->pose.orientation.y<<", "<<feedback->pose.orientation.z<<", "<<feedback->pose.orientation.w<<"]");
 
   collision_object_publisher.publish(createCollisionObject(moveit_msgs::CollisionObject::MOVE, int_marker,
-                                                           mesh_path, scale_x, scale_y, scale_z, feedback->pose));
+                                                           mesh_path, scale_x, scale_y, scale_z,
+                                                           r,g,b,a,
+                                                           feedback->pose));
 }
 
 InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode, const tf::Vector3& position,
                                        const tf::Quaternion& orientation,
                                        bool show_6dof,
                      const std::string& mesh_path, const double scale_x, const double scale_y, const double scale_z,
+                     const double r, const double g, const double b, const double a,
                      const std::string& frame_id,
                      interactive_markers::InteractiveMarkerServer& server, const std::string& name_id)
 {
@@ -100,7 +107,7 @@ InteractiveMarker::Ptr make6DofMarker( bool fixed, unsigned int interaction_mode
   int_marker->description = "Mesh 6-DOF Control";
 
   // insert a box
-  makeBoxControl(*int_marker, mesh_path, scale_x, scale_y, scale_z);
+  makeBoxControl(*int_marker, mesh_path, scale_x, scale_y, scale_z, r, g, b, a);
   int_marker->controls[0].interaction_mode = interaction_mode;
 
   InteractiveMarkerControl control;
@@ -233,12 +240,29 @@ int main(int argc, char** argv)
       ROS_INFO("Orientation: [%f, %f, %f, %f]", q[0], q[1], q[2], q[3]);
   }
 
+  r = 0.5;
+  g = 0.5;
+  b = 0.5;
+  a = 1.0;
+  if(n.hasParam("rgba"))
+  {
+      XmlRpc::XmlRpcValue rgba;
+      n.getParam("rgba", rgba);
+      r = static_cast<double>(rgba[0]);
+      g = static_cast<double>(rgba[1]);
+      b = static_cast<double>(rgba[2]);
+      a = static_cast<double>(rgba[3]);
+      ROS_INFO("rgba: [%f, %f, %f, %f]", r, g, b, a);
+  }
+
+
   // create an interactive marker server on the topic namespace simple_marker
   interactive_markers::InteractiveMarkerServer server("simple_marker_"+name_id);
 
 
   int_marker = make6DofMarker(false, visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D,
-                 position, q, show_control, mesh_path, scale_x, scale_y, scale_z, frame_id, server, name_id);
+                 position, q, show_control, mesh_path, scale_x, scale_y, scale_z,
+                 r, g, b, a, frame_id, server, name_id);
 
   // 'commit' changes and send to all clients
   server.applyChanges();
@@ -252,7 +276,8 @@ int main(int argc, char** argv)
   pose.position.x = position.x(); pose.position.y = position.y(); pose.position.z = position.z();
   pose.orientation.x = q.x(); pose.orientation.y = q.y(); pose.orientation.z = q.z(); pose.orientation.w = q.w();
   collision_object_publisher.publish(createCollisionObject(moveit_msgs::CollisionObject::ADD, int_marker,
-                                                           mesh_path, scale_x, scale_y, scale_z, pose));
+                                                           mesh_path, scale_x, scale_y, scale_z,
+                                                           r,g,b,a, pose));
 
 
   // start the ROS main loop
